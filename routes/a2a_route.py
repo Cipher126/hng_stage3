@@ -17,7 +17,7 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
     try:
         logger.info("Received request: method=%s id=%s", req.method, req.id)
 
-        if req.method != "summarize/pdf":
+        if req.method != "summarize/pdf" or req.method != "message/send":
             logger.warning("Unknown method: %s", req.method)
             return RPCResponse(
                 id=req.id,
