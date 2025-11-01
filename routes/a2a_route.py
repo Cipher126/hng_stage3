@@ -15,7 +15,8 @@ logger = logging.getLogger("a2a_summarize")
 @router.post("/a2a/summarize", tags=["Agent"], description="Summarize PDF via A2A JSON-RPC")
 async def a2a_summarize(req: RPCRequest) -> RPCResponse:
     try:
-        logger.info("Received request: method=%s id=%s", req.method, req.id)
+        logger.warning(req)
+        logger.warning("Received request: method=%s id=%s", req.method, req.id)
 
         if req.method not in ["summarize/pdf", "message/send"]:
             logger.warning("Unknown method: %s", req.method)
