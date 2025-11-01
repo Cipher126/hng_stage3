@@ -26,7 +26,6 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
             )
 
         msg = req.params.message
-        # Ensure taskId exists
         msg.taskId = msg.taskId or f"task-{uuid.uuid4()}"
         task_id = msg.taskId
         message_id = f"msg-{uuid.uuid4()}"
@@ -40,13 +39,12 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
                 error={"message": "No message parts provided"}
             )
 
-        # Extract text
         try:
             if part.file_url:
-                logger.info("Extracting text from URL: %s", part.file_url)
+                logger.warning("Extracting text from URL: %s", part.file_url)
                 text = await extract_text(part.file_url)
             elif part.file_bytes:
-                logger.info("Extracting text from uploaded bytes")
+                logger.warning("Extracting text from uploaded bytes")
                 file_bytes = base64.b64decode(part.file_bytes)
                 text = await extract_text(file_bytes)
             else:
@@ -62,9 +60,8 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
                 error={"message": f"Failed to extract text: {str(e)}"}
             )
 
-        # Summarize
         try:
-            logger.info("Summarizing text (length=%d)", len(text))
+            logger.warning("Summarizing text (length=%d)", len(text))
             summary = await summarize_text(text)
         except Exception as e:
             logger.exception("Failed to summarize text")
@@ -98,7 +95,7 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
             "kind": "task"
         }
 
-        logger.info("Returning summarized response for taskId=%s", task_id)
+        logger.warning("Returning summarized response for taskId=%s", task_id)
         return RPCResponse(id=req.id, result=result)
 
     except Exception as e:
