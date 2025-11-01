@@ -22,15 +22,23 @@ def extract_text_from_pdf_bytes(file_bytes: bytes):
 
 async def extract_text_from_url(url: str):
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
             response = await client.get(url)
+
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail=f"Failed to fetch PDF (status {response.status_code})")
 
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "application/pdf" not in content_type:
+            if not url.lower().endswith(".pdf"):
+                raise HTTPException(status_code=400, detail=f"URL is not a PDF (Content-Type: {content_type})")
+
         return extract_text_from_pdf_bytes(response.content)
+
     except httpx.RequestError as e:
         logger.error(f"Network error downloading PDF: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Error downloading PDF")
+        raise HTTPException(status_code=400, detail="Network error while downloading PDF")
+
     except Exception as e:
         logger.error(f"Extraction from URL failed: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Failed to extract text from remote PDF")

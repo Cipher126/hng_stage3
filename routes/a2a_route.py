@@ -76,6 +76,6 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
         return RPCResponse(id=req.id, result=result)
 
     except HTTPException as he:
-        return RPCResponse(id=req.id, error={"message": he.detail})
+        raise he
     except Exception as e:
-        return RPCResponse(id=req.id, error={"message": str(e)})
+        raise HTTPException(status_code=500, detail="internal server error")
