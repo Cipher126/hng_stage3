@@ -15,7 +15,7 @@ class Message(BaseModel):
     role: str
     parts: List[MessagePart]
     messageId: Optional[str]
-    taskId: Optional[str]
+    taskId: Optional[str] = None
 
 
 class Params(BaseModel):
