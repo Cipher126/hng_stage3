@@ -1,9 +1,9 @@
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter
 from datetime import datetime
+import base64
 import uuid
 import logging
 import re
-import httpx
 
 from schema.rpc_model import RPCRequest, RPCResponse
 from services.pdf_extractor import extract_text
@@ -15,93 +15,11 @@ logger = logging.getLogger("a2a_summarize")
 PDF_URL_PATTERN = re.compile(r"https:\/\/media\.telex\.im\/[^\s'\"]+")
 
 
-async def send_webhook_response(webhook_url: str, token: str, payload: dict):
+@router.post("/a2a/summarize", tags=["Agent"], description="Summarize PDF via A2A JSON-RPC",
+             response_model=RPCResponse)
+async def a2a_summarize(req: RPCRequest) -> RPCResponse:
     try:
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.post(webhook_url, json=payload, headers=headers, timeout=30.0)
-            logger.info(f"Webhook response: status={response.status_code}, body={response.text}")
-    except Exception as e:
-        logger.exception(f"Failed to send webhook response: {e}")
-
-
-async def process_summarization(req_id: str, task_id: str, file_url: str, webhook_config: dict):
-    try:
-        logger.info(f"Background processing started for task {task_id}")
-
-        logger.info(f"Extracting text from URL: {file_url}")
-        text = await extract_text(file_url)
-
-        logger.info(f"Summarizing text (length={len(text)})")
-        summary = await summarize_text(text)
-
-        message_id = f"msg-{uuid.uuid4()}"
-        artifact_id = f"artifact-summary-{uuid.uuid4()}"
-        now = datetime.utcnow().isoformat() + "Z"
-
-        result = {
-            "id": task_id,
-            "contextId": str(uuid.uuid4()),
-            "status": {
-                "state": "completed",
-                "timestamp": now,
-                "message": {
-                    "messageId": message_id,
-                    "role": "agent",
-                    "parts": [{"kind": "text", "text": summary}],
-                    "kind": "message",
-                    "taskId": task_id
-                }
-            },
-            "artifacts": [
-                {
-                    "artifactId": artifact_id,
-                    "name": "summary",
-                    "parts": [{"kind": "text", "text": summary}]
-                }
-            ],
-            "kind": "task"
-        }
-
-        webhook_payload = {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": result
-        }
-
-        logger.info(f"Sending result to webhook for taskId={task_id}")
-        await send_webhook_response(
-            webhook_config["url"],
-            webhook_config["token"],
-            webhook_payload
-        )
-
-    except Exception as e:
-        logger.exception(f"Error in background processing for task {task_id}")
-
-        error_payload = {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "error": {
-                "code": -32603,
-                "message": f"Processing failed: {str(e)}"
-            }
-        }
-
-        await send_webhook_response(
-            webhook_config["url"],
-            webhook_config["token"],
-            error_payload
-        )
-
-
-@router.post("/a2a/summarize", tags=["Agent"], description="Summarize PDF via A2A JSON-RPC")
-async def a2a_summarize(req: RPCRequest, background_tasks: BackgroundTasks) -> RPCResponse:
-    try:
-        logger.info(f"Received request: method={req.method}, id={req.id}")
+        logger.warning(f"Received request: method={req.method}, id={req.id}")
 
         if req.method not in ["summarize/pdf", "message/send"]:
             return RPCResponse(
@@ -110,8 +28,10 @@ async def a2a_summarize(req: RPCRequest, background_tasks: BackgroundTasks) -> R
             )
 
         msg = req.params.message
-        task_id = msg.taskId or f"task-{uuid.uuid4()}"
-        msg.taskId = task_id
+        msg.taskId = msg.taskId or f"task-{uuid.uuid4()}"
+        task_id = msg.taskId
+        message_id = f"msg-{uuid.uuid4()}"
+        artifact_id = f"artifact-summary-{uuid.uuid4()}"
 
         if not msg.parts:
             logger.error("No message parts provided")
@@ -141,46 +61,9 @@ async def a2a_summarize(req: RPCRequest, background_tasks: BackgroundTasks) -> R
                 error={"message": "No PDF URL found in message parts"}
             )
 
-        config = req.params.configuration if hasattr(req.params, 'configuration') else {}
-        is_blocking = config.get('blocking', True) if isinstance(config, dict) else getattr(config, 'blocking', True)
-
-        webhook_config = None
-        if hasattr(req.params, 'configuration'):
-            config = req.params.configuration
-            if isinstance(config, dict) and 'pushNotificationConfig' in config:
-                push_config = config['pushNotificationConfig']
-                webhook_config = {
-                    "url": push_config['url'],
-                    "token": push_config['token']
-                }
-            is_blocking = config.get('blocking', True) if isinstance(config, dict) else getattr(config, 'blocking',
-                                                                                                True)
-        else:
-            is_blocking = True
-        if not is_blocking and webhook_config:
-            logger.info(f"Non-blocking mode: scheduling background task for {task_id}")
-
-            background_tasks.add_task(
-                process_summarization,
-                req.id,
-                task_id,
-                file_url,
-                webhook_config
-            )
-
-            return RPCResponse(
-                id=req.id,
-                result={
-                    "taskId": task_id,
-                    "status": "processing",
-                    "message": "PDF summarization in progress"
-                }
-            )
-
-        logger.info("Blocking mode: processing synchronously")
+        logger.warning(f"Extracting text from URL: {file_url}")
 
         try:
-            logger.info(f"Extracting text from URL: {file_url}")
             text = await extract_text(file_url)
         except Exception as e:
             logger.exception("Failed to extract text")
@@ -190,7 +73,7 @@ async def a2a_summarize(req: RPCRequest, background_tasks: BackgroundTasks) -> R
             )
 
         try:
-            logger.info(f"Summarizing text (length={len(text)})")
+            logger.warning(f"Summarizing text (length={len(text)})")
             summary = await summarize_text(text)
         except Exception as e:
             logger.exception("Failed to summarize text")
@@ -199,10 +82,7 @@ async def a2a_summarize(req: RPCRequest, background_tasks: BackgroundTasks) -> R
                 error={"message": f"Failed to summarize text: {str(e)}"}
             )
 
-        message_id = f"msg-{uuid.uuid4()}"
-        artifact_id = f"artifact-summary-{uuid.uuid4()}"
         now = datetime.utcnow().isoformat() + "Z"
-
         result = {
             "id": task_id,
             "contextId": str(uuid.uuid4()),
@@ -227,7 +107,7 @@ async def a2a_summarize(req: RPCRequest, background_tasks: BackgroundTasks) -> R
             "kind": "task"
         }
 
-        logger.info(f"Returning summarized response for taskId={task_id}")
+        logger.warning(f"Returning summarized response for taskId={task_id}")
         return RPCResponse(id=req.id, result=result)
 
     except Exception as e:
