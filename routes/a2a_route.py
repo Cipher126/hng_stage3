@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 from datetime import datetime
-import base64
 import uuid
 import logging
+import re
 
 from schema.rpc_model import RPCRequest, RPCResponse
 from services.pdf_extractor import extract_text
@@ -11,15 +11,15 @@ from services.summarizer import summarize_text
 router = APIRouter()
 logger = logging.getLogger("a2a_summarize")
 
+PDF_URL_PATTERN = re.compile(r"https:\/\/media\.telex\.im\/[^\s'\"]+")
+
 
 @router.post("/a2a/summarize", tags=["Agent"], description="Summarize PDF via A2A JSON-RPC")
 async def a2a_summarize(req: RPCRequest) -> RPCResponse:
     try:
-        logger.warning(req)
-        logger.warning("Received request: method=%s id=%s", req.method, req.id)
+        logger.warning(f"Received request: method={req.method}, id={req.id}")
 
         if req.method not in ["summarize/pdf", "message/send"]:
-            logger.warning("Unknown method: %s", req.method)
             return RPCResponse(
                 id=req.id,
                 error={"message": f"Unknown method {req.method}"}
@@ -31,28 +31,38 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
         message_id = f"msg-{uuid.uuid4()}"
         artifact_id = f"artifact-summary-{uuid.uuid4()}"
 
-        part = msg.parts[0] if msg.parts else None
-        if not part:
+        if not msg.parts:
             logger.error("No message parts provided")
+            return RPCResponse(id=req.id, error={"message": "No message parts provided"})
+
+        file_url = None
+        for part in msg.parts:
+            if getattr(part, "text", None):
+                match = PDF_URL_PATTERN.search(part.text)
+                if match:
+                    file_url = match.group(0)
+                    break
+            if getattr(part, "data", None):
+                for d in part.data:
+                    if isinstance(d, dict) and "text" in d:
+                        match = PDF_URL_PATTERN.search(d["text"])
+                        if match:
+                            file_url = match.group(0)
+                            break
+                if file_url:
+                    break
+
+        if not file_url:
+            logger.warning("No file URL found in message parts")
             return RPCResponse(
                 id=req.id,
-                error={"message": "No message parts provided"}
+                error={"message": "No PDF URL found in message parts"}
             )
 
+        logger.warning(f"Extracting text from URL: {file_url}")
+
         try:
-            if part.file_url:
-                logger.warning("Extracting text from URL: %s", part.file_url)
-                text = await extract_text(part.file_url)
-            elif part.file_bytes:
-                logger.warning("Extracting text from uploaded bytes")
-                file_bytes = base64.b64decode(part.file_bytes)
-                text = await extract_text(file_bytes)
-            else:
-                logger.error("No file URL or bytes provided")
-                return RPCResponse(
-                    id=req.id,
-                    error={"message": "No file URL or bytes provided"}
-                )
+            text = await extract_text(file_url)
         except Exception as e:
             logger.exception("Failed to extract text")
             return RPCResponse(
@@ -61,7 +71,7 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
             )
 
         try:
-            logger.warning("Summarizing text (length=%d)", len(text))
+            logger.warning(f"Summarizing text (length={len(text)})")
             summary = await summarize_text(text)
         except Exception as e:
             logger.exception("Failed to summarize text")
@@ -95,7 +105,7 @@ async def a2a_summarize(req: RPCRequest) -> RPCResponse:
             "kind": "task"
         }
 
-        logger.warning("Returning summarized response for taskId=%s", task_id)
+        logger.warning(f"Returning summarized response for taskId={task_id}")
         return RPCResponse(id=req.id, result=result)
 
     except Exception as e:
