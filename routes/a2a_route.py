@@ -141,15 +141,22 @@ async def a2a_summarize(req: RPCRequest, background_tasks: BackgroundTasks) -> R
                 error={"message": "No PDF URL found in message parts"}
             )
 
-        is_blocking = req.params.configuration.blocking if hasattr(req.params, 'configuration') else True
+        config = req.params.configuration if hasattr(req.params, 'configuration') else {}
+        is_blocking = config.get('blocking', True) if isinstance(config, dict) else getattr(config, 'blocking', True)
+
         webhook_config = None
-
-        if hasattr(req.params, 'configuration') and hasattr(req.params.configuration, 'pushNotificationConfig'):
-            webhook_config = {
-                "url": req.params.configuration.pushNotificationConfig.url,
-                "token": req.params.configuration.pushNotificationConfig.token
-            }
-
+        if hasattr(req.params, 'configuration'):
+            config = req.params.configuration
+            if isinstance(config, dict) and 'pushNotificationConfig' in config:
+                push_config = config['pushNotificationConfig']
+                webhook_config = {
+                    "url": push_config['url'],
+                    "token": push_config['token']
+                }
+            is_blocking = config.get('blocking', True) if isinstance(config, dict) else getattr(config, 'blocking',
+                                                                                                True)
+        else:
+            is_blocking = True
         if not is_blocking and webhook_config:
             logger.info(f"Non-blocking mode: scheduling background task for {task_id}")
 
