@@ -35,3 +35,7 @@ class RPCResponse(BaseModel):
     id: str
     result: Optional[Dict[str, Any]] = None
     error: Optional[Dict[str, Any]] = None
+
+    class Config:
+        extra = "ignore"
+        exclude_none = True

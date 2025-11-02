@@ -16,7 +16,7 @@ PDF_URL_PATTERN = re.compile(r"https:\/\/media\.telex\.im\/[^\s'\"]+")
 
 
 @router.post("/a2a/summarize", tags=["Agent"], description="Summarize PDF via A2A JSON-RPC",
-             response_model=RPCResponse)
+             response_model=RPCResponse, response_model_exclude_none=True)  # Added this parameter
 async def a2a_summarize(req: RPCRequest) -> RPCResponse:
     try:
         logger.warning(f"Received request: method={req.method}, id={req.id}")
